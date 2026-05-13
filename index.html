@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>SISTEMA EMUDRASTIC CLOUD - RENTA POR JUEGO</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Exo+2:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#050508; --surface:#0f0f18; --surface2:#16161f;
+  --border:#1e1e2e; --red:#ff2244; --cyan:#00e5ff; --text:#e8e8f0; --muted:#555570; --green:#00ff88;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Exo 2',sans-serif; overflow-x: hidden;}
+
+/* UI General */
+.welcome-overlay{position:fixed;inset:0;background:var(--bg);z-index:1000;display:flex;align-items:center;justify-content:center;}
+.welcome-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:40px;text-align:center;width:90%;max-width:400px;}
+.login-input{width:100%;background:#000;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:12px;margin-bottom:12px;outline:none;border-color: var(--border);}
+.btn{width:100%;padding:14px;border:none;border-radius:6px;font-family:'Orbitron';font-size:11px;cursor:pointer;letter-spacing:2px;text-transform:uppercase;transition: 0.3s;}
+.btn-primary{background:var(--cyan);color:#000;font-weight:700;}
+.btn-admin{background:transparent;color:var(--muted);margin-top:20px;font-size:9px;border:none;}
+
+#app, #admin-panel, #emulator-screen { display: none; padding: 20px; max-width: 900px; margin: auto; }
+.game-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 15px; margin-top: 20px; }
+.game-card { background: var(--surface); border: 1px solid var(--border); padding: 20px; border-radius: 8px; text-align: center; cursor: pointer; }
+.game-card:hover { border-color: var(--cyan); background: var(--surface2); }
+.expire-tag { font-size: 10px; margin-top: 8px; color: var(--red); font-weight: bold; }
+
+/* Admin */
+.admin-form { background: var(--surface2); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;}
+.admin-table th, .admin-table td { border: 1px solid var(--border); padding: 10px; text-align: left; }
+
+#emulator-js { width: 100%; height: 75vh; background: #000; border-radius: 8px; border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div id="login-screen" class="welcome-overlay">
+  <div class="welcome-box">
+    <h1 style="font-family:'Orbitron'; color:var(--cyan); margin-bottom:25px; letter-spacing: 5px;">SISTEMA</h1>
+    <input type="text" id="user-input" class="login-input" placeholder="USUARIO">
+    <input type="password" id="pass-input" class="login-input" placeholder="CONTRASEÑA">
+    <button class="btn btn-primary" onclick="login()">ENTRAR</button>
+    <button class="btn btn-admin" onclick="showAdminPrompt()">CONFIGURACIÓN</button>
+  </div>
+</div>
+
+<div id="app">
+  <header style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+    <h2 style="font-family:'Orbitron'; font-size:14px; color: var(--cyan);">MIS JUEGOS RENTADOS</h2>
+    <button onclick="location.reload()" style="background:var(--red); border:none; color:white; padding:5px 12px; border-radius:4px; font-size:10px; cursor:pointer; font-family: 'Orbitron';">SALIR</button>
+  </header>
+  <div id="user-games" class="game-grid"></div>
+</div>
+
+<div id="admin-panel">
+    <h2 style="font-family:'Orbitron'; color:var(--red); margin-bottom:20px;">ADMINISTRADOR</h2>
+    <div class="admin-form">
+      <h4 style="margin-bottom:10px; font-size:12px;">CREAR/EDITAR USUARIO</h4>
+      <input type="text" id="new-user" class="login-input" placeholder="Nombre Usuario">
+      <input type="text" id="new-pass" class="login-input" placeholder="Contraseña">
+      <p style="font-size:10px; color:var(--muted); margin-bottom:5px;">Formato: ID:Dias,ID:Dias (Ej: 1:30,2:7)</p>
+      <input type="text" id="game-rentals" class="login-input" placeholder="Juego:Días (Ej: 1:30,2:7)">
+      <button class="btn btn-primary" onclick="createUser()">GUARDAR EN NUBE</button>
+    </div>
+    <button class="btn" onclick="location.reload()" style="background:var(--muted); margin-bottom:10px;">VOLVER</button>
+    <table class="admin-table">
+      <thead><tr><th>User</th><th>Contraseña</th><th>Juegos Rentados</th><th>Acción</th></tr></thead>
+      <tbody id="user-list"></tbody>
+    </table>
+</div>
+
+<div id="emulator-screen">
+    <button onclick="location.reload()" style="background:var(--red); color:white; border:none; padding:10px; width:100%; margin-bottom:10px; font-family:'Orbitron'; cursor:pointer; border-radius: 6px;">SALIR DEL JUEGO</button>
+    <div id="emulator-js"></div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBlVDryz6u8pgOtg5UvcStUQ6grxMTpLFc",
+    authDomain: "emudrastic.firebaseapp.com",
+    projectId: "emudrastic",
+    storageBucket: "emudrastic.firebasestorage.app",
+    messagingSenderId: "763294622055",
+    appId: "1:763294622055:web:280fc25146c19acadf8fc2",
+    measurementId: "G-02L6JYV71T"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  window.login = async () => {
+    const u = document.getElementById('user-input').value.trim();
+    const p = document.getElementById('pass-input').value.trim();
+    if(!u || !p) return;
+
+    try {
+      const docRef = doc(db, "usuarios", u);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.pass === p) {
+          window.currentUserData = data;
+          showUserPanel();
+        } else { alert("Error"); }
+      } else { alert("No existe"); }
+    } catch (e) { console.error(e); }
+  };
+
+  window.createUser = async () => {
+    const user = document.getElementById('new-user').value.trim();
+    const pass = document.getElementById('new-pass').value.trim();
+    const rentalInput = document.getElementById('game-rentals').value.trim();
+
+    if(!user || !pass || !rentalInput) return alert("Faltan datos");
+
+    // Convertir 1:30,2:7 en un objeto { "1": "fecha", "2": "fecha" }
+    const rentals = {};
+    const items = rentalInput.split(',');
+    items.forEach(item => {
+      const [id, days] = item.split(':');
+      const expireDate = new Date();
+      expireDate.setDate(expireDate.getDate() + parseInt(days));
+      rentals[id.trim()] = expireDate.toISOString();
+    });
+
+    try {
+      await setDoc(doc(db, "usuarios", user), {
+        pass: pass,
+        rentals: rentals
+      });
+      alert("LISTO");
+      renderAdmin();
+    } catch (e) { alert("Error"); }
+  };
+
+  window.deleteUser = async (id) => {
+    if(confirm("¿Borrar?")) { await deleteDoc(doc(db, "usuarios", id)); renderAdmin(); }
+  };
+
+  window.renderAdmin = async () => {
+    const tbody = document.getElementById('user-list');
+    const querySnapshot = await getDocs(collection(db, "usuarios"));
+    tbody.innerHTML = "";
+    querySnapshot.forEach((doc) => {
+      const a = doc.data();
+      tbody.innerHTML += `<tr>
+        <td>${doc.id}</td>
+        <td>${a.pass}</td>
+        <td>${JSON.stringify(a.rentals)}</td>
+        <td><button onclick="deleteUser('${doc.id}')" style="color:red; background:none; border:none; cursor:pointer;">X</button></td>
+      </tr>`;
+    });
+  };
+</script>
+
+<script>
+// --- TU BASE DE DATOS DE JUEGOS ---
+const GAMES_DATABASE = [
+  { id: "1", name: "POKEMON ESMERALDA", url: "https://docs.google.com/uc?export=download&id=1IOW48GTZ9YoUamn8YBn0BJlz0MiwiBGj", core: "gba" },
+  { id: "2", name: "POKEMON ROJO FUEGO", url: "https://docs.google.com/uc?export=download&id=10q_1kw5FCpMA4W1JzNG3wEfiKppuuzCy", core: "gba" },
+  { id: "3", name: "POKEMON VERDE HOJA", url: "https://docs.google.com/uc?export=download&id=1cPZtCOZdENuOPsiRLQY6zyYjCv5u49a7", core: "gba" },
+  { id: "4", name: "POKEMON RUBI", url: "https://docs.google.com/uc?export=download&id=1Rb1jIC372pVMCh3uU6rdP7gzDKk74peq", core: "gba" },
+  { id: "5", name: "POKEMON ZAFIRO", url: "https://docs.google.com/uc?export=download&id=1y6e5K8sA7S1OSxiunVSs_aWtf6tBh7V_", core: "gba" }
+];
+
+const ADMIN_KEY = "1100"; 
+
+function showUserPanel() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  const container = document.getElementById('user-games');
+  const rentals = window.currentUserData.rentals; // Es un objeto { "id": "fecha" }
+
+  GAMES_DATABASE.forEach(game => {
+    // Si el usuario tiene este juego en su lista de rentas
+    if (rentals[game.id]) {
+      const expireDate = new Date(rentals[game.id]);
+      const hoy = new Date();
+
+      // Solo mostrar si no ha caducado
+      if (expireDate > hoy) {
+        const card = document.createElement('div');
+        card.className = 'game-card';
+        card.innerHTML = `
+          <div style="font-weight:bold">${game.name}</div>
+          <div class="expire-tag">Vence: ${expireDate.toLocaleDateString()}</div>
+        `;
+        card.onclick = () => startEmulator(game);
+        container.appendChild(card);
+      }
+    }
+  });
+}
+
+function startEmulator(game) {
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('emulator-screen').style.display = 'block';
+    window.EJS_player = '#emulator-js';
+    window.EJS_core = game.core;
+    window.EJS_gameUrl = game.url;
+    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+    window.EJS_Buttons = ["fullscreen", "save_state", "load_state"]; 
+
+    const script = document.createElement('script');
+    script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+    document.body.appendChild(script);
+}
+
+function showAdminPrompt() {
+  if (prompt("CLAVE ADMIN:") === ADMIN_KEY) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('admin-panel').style.display = 'block';
+    window.renderAdmin();
+  }
+}
+</script>
+</body>
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyBlVDryz6u8pgOtg5UvcStUQ6grxMTpLFc",
+    authDomain: "emudrastic.firebaseapp.com",
+    projectId: "emudrastic",
+    storageBucket: "emudrastic.firebasestorage.app",
+    messagingSenderId: "763294622055",
+    appId: "1:763294622055:web:6b8839aabd60c7c7df8fc2",
+    measurementId: "G-RBQ8S3W7BP"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+</script>
+</html>
